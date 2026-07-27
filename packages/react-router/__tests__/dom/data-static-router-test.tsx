@@ -867,6 +867,112 @@ describe("A <StaticRouterProvider>", () => {
     );
   });
 
+  it("supports a custom serializeError prop", async () => {
+    class NotFoundError extends Error {
+      code: string;
+      constructor(message: string) {
+        super(message);
+        this.name = "NotFoundError";
+        this.code = "NOT_FOUND";
+      }
+    }
+
+    let routes = [
+      {
+        path: "/",
+        loader: () => {
+          throw new NotFoundError("Not found.");
+        },
+      },
+    ];
+    let { query } = createStaticHandler(routes);
+
+    let context = (await query(
+      new Request("http://localhost/", {
+        signal: new AbortController().signal,
+      }),
+    )) as StaticHandlerContext;
+
+    let html = ReactDOMServer.renderToStaticMarkup(
+      <React.StrictMode>
+        <StaticRouterProvider
+          router={createStaticRouter(routes, context)}
+          context={context}
+          serializeError={(error) =>
+            error instanceof NotFoundError
+              ? { name: error.name, message: error.message, code: error.code }
+              : undefined
+          }
+        />
+      </React.StrictMode>,
+    );
+
+    let expectedJsonString = JSON.stringify(
+      JSON.stringify({
+        loaderData: {},
+        actionData: null,
+        errors: {
+          "0": {
+            __type: "CustomError",
+            data: {
+              name: "NotFoundError",
+              message: "Not found.",
+              code: "NOT_FOUND",
+            },
+          },
+        },
+      }),
+    );
+    expect(html).toMatch(
+      `<script>window.__staticRouterHydrationData = JSON.parse(${expectedJsonString});</script>`,
+    );
+  });
+
+  it("falls back to default error serialization when serializeError returns undefined", async () => {
+    let routes = [
+      {
+        path: "/",
+        loader: () => {
+          throw new ReferenceError("oh no");
+        },
+      },
+    ];
+    let { query } = createStaticHandler(routes);
+
+    let context = (await query(
+      new Request("http://localhost/", {
+        signal: new AbortController().signal,
+      }),
+    )) as StaticHandlerContext;
+
+    let html = ReactDOMServer.renderToStaticMarkup(
+      <React.StrictMode>
+        <StaticRouterProvider
+          router={createStaticRouter(routes, context)}
+          context={context}
+          serializeError={() => undefined}
+        />
+      </React.StrictMode>,
+    );
+
+    let expectedJsonString = JSON.stringify(
+      JSON.stringify({
+        loaderData: {},
+        actionData: null,
+        errors: {
+          "0": {
+            message: "oh no",
+            __type: "Error",
+            __subType: "ReferenceError",
+          },
+        },
+      }),
+    );
+    expect(html).toMatch(
+      `<script>window.__staticRouterHydrationData = JSON.parse(${expectedJsonString});</script>`,
+    );
+  });
+
   it("supports a nonce prop", async () => {
     let routes = [
       {

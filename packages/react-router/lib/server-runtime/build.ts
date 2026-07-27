@@ -8,6 +8,7 @@ import type {
   CriticalCss,
   EntryContext,
   FutureConfig,
+  SerializeErrorFunction,
 } from "../dom/ssr/entry";
 import type { ServerRouteManifest } from "./routes";
 import type { ServerInstrumentation } from "../router/instrumentation";
@@ -83,6 +84,13 @@ export interface ServerEntryModule {
   default: HandleDocumentRequestFunction;
   handleDataRequest?: HandleDataRequestFunction;
   handleError?: HandleErrorFunction;
+  /**
+   * Optional hook to customize how errors are serialized on the server before
+   * they are streamed to the client for hydration/data requests. Pair this with
+   * `unstable_deserializeError` on `<HydratedRouter>` in your `entry.client`
+   * module. See {@link SerializeErrorFunction}.
+   */
+  unstable_serializeError?: SerializeErrorFunction;
   instrumentations?: ServerInstrumentation[];
   streamTimeout?: number;
 }

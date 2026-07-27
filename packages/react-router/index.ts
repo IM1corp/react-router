@@ -272,6 +272,11 @@ export type {
 } from "./lib/server-runtime/build";
 
 export type {
+  SerializeErrorFunction,
+  DeserializeErrorFunction,
+} from "./lib/dom/ssr/entry";
+
+export type {
   Cookie,
   CookieOptions,
   CookieParseOptions,

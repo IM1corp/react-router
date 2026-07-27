@@ -527,7 +527,13 @@ async function handleDocumentRequest(
           handleError(err);
         }
       });
-      context.errors = sanitizeErrors(context.errors, serverMode);
+      // When the app provides a custom `unstable_serializeError` hook we leave
+      // the original errors intact so the hook receives them (rather than a
+      // sanitized generic Error).  Errors the hook declines to handle are still
+      // sanitized at encode time via `encodeViaTurboStream`.
+      if (!build.entry.module.unstable_serializeError) {
+        context.errors = sanitizeErrors(context.errors, serverMode);
+      }
     }
 
     // Server UI state to send to the client.
@@ -560,6 +566,7 @@ async function handleDocumentRequest(
         request.signal,
         build.entry.module.streamTimeout,
         serverMode,
+        build.entry.module.unstable_serializeError,
       ),
       renderMeta: {},
       future: build.future,
@@ -608,8 +615,11 @@ async function handleDocumentRequest(
         errorForSecondRender,
       );
 
-      // Sanitize errors outside of development environments
-      if (context.errors) {
+      // Sanitize errors outside of development environments, unless the app
+      // provides a custom `unstable_serializeError` hook (in which case the
+      // original errors are preserved for the hook and declined errors are
+      // sanitized at encode time via `encodeViaTurboStream`).
+      if (context.errors && !build.entry.module.unstable_serializeError) {
         context.errors = sanitizeErrors(context.errors, serverMode);
       }
 
@@ -631,6 +641,7 @@ async function handleDocumentRequest(
           request.signal,
           build.entry.module.streamTimeout,
           serverMode,
+          build.entry.module.unstable_serializeError,
         ),
         renderMeta: {},
       };

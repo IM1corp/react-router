@@ -114,4 +114,65 @@ describe("turbo-stream error decoding", () => {
     expect(error.data).toBe("Missing");
     expect(error.internal).toBe(false);
   });
+
+  it("round-trips errors through custom serializeError/deserializeError hooks", async () => {
+    class NotFoundError extends Error {
+      code: string;
+      constructor(message: string, code: string) {
+        super(message);
+        this.name = "NotFoundError";
+        this.code = code;
+      }
+    }
+
+    let body = encodeViaTurboStream(
+      {
+        errors: {
+          root: new NotFoundError("Not found.", "NOT_FOUND"),
+        },
+      },
+      new AbortController().signal,
+      undefined,
+      // Even in production mode the custom hook receives the original error and
+      // its output is sent as-is (the app owns sanitization).
+      ServerMode.Production,
+      (error) =>
+        error instanceof NotFoundError
+          ? { message: error.message, code: error.code }
+          : undefined,
+    );
+
+    let decoded = await decodeViaTurboStream(
+      body,
+      global,
+      (data: any) => new NotFoundError(data.message, data.code),
+    );
+    let error = (decoded.value as any).errors.root;
+
+    expect(error).toBeInstanceOf(NotFoundError);
+    expect(error.message).toBe("Not found.");
+    expect(error.code).toBe("NOT_FOUND");
+  });
+
+  it("sanitizes errors the custom serializeError hook declines in production", async () => {
+    let body = encodeViaTurboStream(
+      {
+        errors: {
+          root: new Error("sensitive details"),
+        },
+      },
+      new AbortController().signal,
+      undefined,
+      ServerMode.Production,
+      // Decline to handle -> falls back to default sanitization
+      () => undefined,
+    );
+
+    let decoded = await decodeViaTurboStream(body, global);
+    let error = (decoded.value as any).errors.root;
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe("Unexpected Server Error");
+    expect(error.stack).toBeUndefined();
+  });
 });

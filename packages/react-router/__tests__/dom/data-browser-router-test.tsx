@@ -8153,6 +8153,70 @@ function testDomRouter(
         }
       });
 
+      it("deserializes CustomError payloads via the deserializeError option", async () => {
+        class NotFoundError extends Error {
+          code: string;
+          constructor(message: string, code: string) {
+            super(message);
+            this.name = "NotFoundError";
+            this.code = code;
+          }
+        }
+
+        window.__staticRouterHydrationData = {
+          loaderData: {},
+          actionData: null,
+          errors: {
+            "0": {
+              // @ts-expect-error - CustomError is a runtime-only wire marker
+              __type: "CustomError",
+              data: { message: "Not found.", code: "NOT_FOUND" },
+            },
+          },
+        };
+        let router = createTestRouter(
+          [
+            {
+              path: "/",
+              Component: () => <h1>Nope</h1>,
+              ErrorBoundary: () => <Boundary />,
+            },
+          ],
+          {
+            deserializeError: (data: any) =>
+              new NotFoundError(data.message, data.code),
+          },
+        );
+        let { container } = render(<RouterProvider router={router} />);
+
+        function Boundary() {
+          let error = useRouteError() as NotFoundError;
+          return error instanceof NotFoundError ? (
+            <>
+              <pre>{error.name}</pre>
+              <pre>{error.message}</pre>
+              <pre>{error.code}</pre>
+            </>
+          ) : (
+            <p>No :(</p>
+          );
+        }
+
+        expect(getHtml(container)).toMatchInlineSnapshot(`
+          "<div>
+            <pre>
+              NotFoundError
+            </pre>
+            <pre>
+              Not found.
+            </pre>
+            <pre>
+              NOT_FOUND
+            </pre>
+          </div>"
+        `);
+      });
+
       it("renders hydration errors on leaf elements", async () => {
         let router = createTestRouter(
           [

@@ -33,6 +33,7 @@ import {
   ViewTransitionContext,
 } from "../context";
 import { escapeHtml } from "./ssr/markup";
+import type { SerializeErrorFunction } from "./ssr/entry";
 
 /**
  * @category Types
@@ -121,6 +122,17 @@ export interface StaticRouterProviderProps {
    * tag
    */
   nonce?: string;
+  /**
+   * Optional hook to customize how errors are serialized into the hydration
+   * data embedded in the HTML (`window.__staticRouterHydrationData`).  Return a
+   * JSON-serializable payload to send to the client (paired with
+   * `deserializeError` on {@link createBrowserRouter}/{@link createHashRouter}),
+   * or `undefined` to fall back to the default error serialization.
+   *
+   * NOTE: You are responsible for stripping any sensitive information (e.g.
+   * `stack`) that you don't want to leak to the client.
+   */
+  serializeError?: SerializeErrorFunction;
 }
 
 /**
@@ -158,6 +170,7 @@ export function StaticRouterProvider({
   router,
   hydrate = true,
   nonce,
+  serializeError,
 }: StaticRouterProviderProps) {
   invariant(
     router && context,
@@ -180,7 +193,7 @@ export function StaticRouterProvider({
     let data = {
       loaderData: context.loaderData,
       actionData: context.actionData,
-      errors: serializeErrors(context.errors),
+      errors: serializeErrors(context.errors, serializeError),
     };
     // Use JSON.parse here instead of embedding a raw JS object here to speed
     // up parsing on the client.  Dual-stringify is needed to ensure all quotes
@@ -231,6 +244,7 @@ export function StaticRouterProvider({
 
 function serializeErrors(
   errors: StaticHandlerContext["errors"],
+  serializeError?: SerializeErrorFunction,
 ): StaticHandlerContext["errors"] {
   if (!errors) return null;
   let entries = Object.entries(errors);
@@ -238,6 +252,17 @@ function serializeErrors(
   for (let [key, val] of entries) {
     // Hey you!  If you change this, please change the corresponding logic in
     // deserializeErrors in lib/dom/lib.tsx :)
+    if (serializeError && val instanceof Error) {
+      // Give the app-provided hook the first crack at any Error so it can
+      // preserve custom error data across the wire.  A returned value is sent
+      // as-is (wrapped in a `CustomError` marker); `undefined` falls through to
+      // the default handling below.
+      let data = serializeError(val);
+      if (data !== undefined) {
+        serialized[key] = { __type: "CustomError", data };
+        continue;
+      }
+    }
     if (isRouteErrorResponse(val)) {
       serialized[key] = { ...val, __type: "RouteErrorResponse" };
     } else if (val instanceof Error) {

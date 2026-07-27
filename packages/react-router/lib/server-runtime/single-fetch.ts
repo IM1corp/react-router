@@ -13,6 +13,7 @@ import type {
   SingleFetchResult,
   SingleFetchResults,
 } from "../dom/ssr/single-fetch";
+import type { SerializeErrorFunction } from "../dom/ssr/entry";
 import {
   NO_BODY_STATUS_CODES,
   SINGLE_FETCH_REDIRECT_STATUS,
@@ -107,7 +108,13 @@ export async function singleFetchAction(
           handleError(err);
         }
       });
-      context.errors = sanitizeErrors(context.errors, serverMode);
+      // When the app provides a custom `unstable_serializeError` hook we leave
+      // the original errors intact so the hook receives them (rather than a
+      // sanitized generic Error).  Errors the hook declines to handle are still
+      // sanitized at encode time via `encodeViaTurboStream`.
+      if (!build.entry.module.unstable_serializeError) {
+        context.errors = sanitizeErrors(context.errors, serverMode);
+      }
     }
 
     let singleFetchResult: SingleFetchResult;
@@ -190,7 +197,13 @@ export async function singleFetchLoaders(
           handleError(err);
         }
       });
-      context.errors = sanitizeErrors(context.errors, serverMode);
+      // When the app provides a custom `unstable_serializeError` hook we leave
+      // the original errors intact so the hook receives them (rather than a
+      // sanitized generic Error).  Errors the hook declines to handle are still
+      // sanitized at encode time via `encodeViaTurboStream`.
+      if (!build.entry.module.unstable_serializeError) {
+        context.errors = sanitizeErrors(context.errors, serverMode);
+      }
     }
 
     // Aggregate results based on the matches we intended to load since we get
@@ -265,6 +278,7 @@ function generateSingleFetchResponse(
       request.signal,
       build.entry.module.streamTimeout,
       serverMode,
+      build.entry.module.unstable_serializeError,
     ),
     {
       status: status || 200,
@@ -356,6 +370,7 @@ export function encodeViaTurboStream(
   requestSignal: AbortSignal,
   streamTimeout: number | undefined,
   serverMode: ServerMode,
+  serializeError?: SerializeErrorFunction,
 ) {
   let controller = new AbortController();
   // How long are we willing to wait for all of the promises in `data` to resolve
@@ -388,6 +403,19 @@ export function encodeViaTurboStream(
     signal: controller.signal,
     onComplete: cleanupCallbacks,
     plugins: [
+      (value) => {
+        // Give the app-provided `unstable_serializeError` hook the first crack
+        // at any Error so it can preserve custom error data across the wire.
+        // A returned value is sent as-is (the app is responsible for stripping
+        // sensitive info); `undefined` falls through to the default handling
+        // below.
+        if (serializeError && value instanceof Error) {
+          let serialized = serializeError(value);
+          if (serialized !== undefined) {
+            return ["CustomError", serialized];
+          }
+        }
+      },
       (value) => {
         // Even though we sanitized errors on context.errors prior to responding,
         // we still need to handle this for any deferred data that rejects with an

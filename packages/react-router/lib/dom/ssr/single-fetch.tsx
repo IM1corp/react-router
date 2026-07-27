@@ -17,7 +17,11 @@ import {
   data,
 } from "../../router/utils";
 import { createRequestInit } from "./data";
-import type { AssetsManifest, EntryContext } from "./entry";
+import type {
+  AssetsManifest,
+  DeserializeErrorFunction,
+  EntryContext,
+} from "./entry";
 import { escapeHtml } from "./markup";
 import invariant from "./invariant";
 import type { RouteModules } from "./routeModules";
@@ -177,6 +181,7 @@ export function getTurboStreamSingleFetchDataStrategy(
   manifest: AssetsManifest,
   routeModules: RouteModules,
   ssr: boolean,
+  deserializeError?: DeserializeErrorFunction,
 ): DataStrategyFunction {
   let dataStrategy = getSingleFetchDataStrategyImpl(
     getRouter,
@@ -188,7 +193,8 @@ export function getTurboStreamSingleFetchDataStrategy(
         hasClientLoader: manifestRoute.hasClientLoader,
       };
     },
-    fetchAndDecodeViaTurboStream,
+    (args, targetRoutes) =>
+      fetchAndDecodeViaTurboStream(args, targetRoutes, deserializeError),
     ssr,
   );
   return async (args) => args.runClientMiddleware(dataStrategy);
@@ -583,6 +589,7 @@ export function singleFetchUrl(
 async function fetchAndDecodeViaTurboStream(
   args: DataStrategyFunctionArgs,
   targetRoutes?: string[],
+  deserializeError?: DeserializeErrorFunction,
 ): Promise<{ status: number; data: DecodedSingleFetchResults }> {
   let { request } = args;
   let url = singleFetchUrl(request.url, "data");
@@ -637,7 +644,11 @@ async function fetchAndDecodeViaTurboStream(
   invariant(res.body, "No response body to decode");
 
   try {
-    let decoded = await decodeViaTurboStream(res.body, window);
+    let decoded = await decodeViaTurboStream(
+      res.body,
+      window,
+      deserializeError,
+    );
     let data: DecodedSingleFetchResults;
     if (request.method === "GET") {
       let typed = decoded.value as SingleFetchResults;
@@ -676,10 +687,23 @@ async function fetchAndDecodeViaTurboStream(
 export function decodeViaTurboStream(
   body: ReadableStream<Uint8Array>,
   global: Window | typeof globalThis,
+  deserializeError?: DeserializeErrorFunction,
 ) {
   return decode(body, {
     plugins: [
       (type: string, ...rest: unknown[]) => {
+        // Reconstruct errors serialized by the app-provided
+        // `unstable_serializeError` hook via the paired `deserializeError`.
+        // If no hook was provided (misconfiguration) or it declines to handle
+        // the payload, fall back to the raw serialized value.
+        if (type === "CustomError") {
+          let payload = rest[0];
+          let deserialized = deserializeError
+            ? deserializeError(payload)
+            : undefined;
+          return { value: deserialized !== undefined ? deserialized : payload };
+        }
+
         // Decode Errors back into Error instances using the right type and with
         // the right (potentially undefined) stacktrace
         if (type === "SanitizedError") {

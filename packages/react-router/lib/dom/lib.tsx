@@ -67,6 +67,7 @@ import type {
   PrefetchBehavior,
   ScriptsProps,
 } from "./ssr/components";
+import type { DeserializeErrorFunction } from "./ssr/entry";
 import {
   PrefetchPageLinks,
   FrameworkContext,
@@ -616,6 +617,24 @@ export interface DOMRouterOpts {
    */
   patchRoutesOnNavigation?: PatchRoutesOnNavigationFunction;
   /**
+   * Optional hook to reconstruct errors on the client from the payload produced
+   * by a custom `serializeError` passed to {@link StaticRouterProvider} on the
+   * server.  It receives the serialized payload and should return the
+   * reconstructed error (typically an `Error` instance), or `undefined` to leave
+   * the raw payload as-is.
+   *
+   * ```tsx
+   * const router = createBrowserRouter(routes, {
+   *   deserializeError(data) {
+   *     let error = new MyError(data.message);
+   *     error.code = data.code;
+   *     return error;
+   *   },
+   * });
+   * ```
+   */
+  deserializeError?: DeserializeErrorFunction;
+  /**
    * [`Window`](https://developer.mozilla.org/en-US/docs/Web/API/Window) object
    * override. Defaults to the global `window` instance.
    */
@@ -655,7 +674,8 @@ export function createBrowserRouter(
     getContext: opts?.getContext,
     future: opts?.future,
     history: createBrowserHistory({ window: opts?.window }),
-    hydrationData: opts?.hydrationData || parseHydrationData(),
+    hydrationData:
+      opts?.hydrationData || parseHydrationData(opts?.deserializeError),
     routes,
     mapRouteProperties: defaultMapRouteProperties,
     hydrationRouteProperties,
@@ -698,7 +718,8 @@ export function createHashRouter(
     getContext: opts?.getContext,
     future: opts?.future,
     history: createHashHistory({ window: opts?.window }),
-    hydrationData: opts?.hydrationData || parseHydrationData(),
+    hydrationData:
+      opts?.hydrationData || parseHydrationData(opts?.deserializeError),
     routes,
     mapRouteProperties: defaultMapRouteProperties,
     hydrationRouteProperties,
@@ -709,12 +730,14 @@ export function createHashRouter(
   }).initialize();
 }
 
-function parseHydrationData(): HydrationState | undefined {
+function parseHydrationData(
+  deserializeError?: DeserializeErrorFunction,
+): HydrationState | undefined {
   let state = window?.__staticRouterHydrationData;
   if (state && state.errors) {
     state = {
       ...state,
-      errors: deserializeErrors(state.errors),
+      errors: deserializeErrors(state.errors, deserializeError),
     };
   }
   return state;
@@ -722,6 +745,7 @@ function parseHydrationData(): HydrationState | undefined {
 
 function deserializeErrors(
   errors: DataRouter["state"]["errors"],
+  deserializeError?: DeserializeErrorFunction,
 ): DataRouter["state"]["errors"] {
   if (!errors) return null;
   let entries = Object.entries(errors);
@@ -729,7 +753,14 @@ function deserializeErrors(
   for (let [key, val] of entries) {
     // Hey you!  If you change this, please change the corresponding logic in
     // serializeErrors in lib/dom/server.tsx :)
-    if (val && val.__type === "RouteErrorResponse") {
+    if (val && val.__type === "CustomError") {
+      // Reconstruct via the app-provided hook.  Fall back to the raw payload if
+      // no hook was provided (misconfiguration) or it declines to handle it.
+      let deserialized = deserializeError
+        ? deserializeError(val.data)
+        : undefined;
+      serialized[key] = deserialized !== undefined ? deserialized : val.data;
+    } else if (val && val.__type === "RouteErrorResponse") {
       serialized[key] = new ErrorResponseImpl(
         val.status,
         val.statusText,

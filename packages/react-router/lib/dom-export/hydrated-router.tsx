@@ -4,6 +4,7 @@ import type {
   UNSAFE_AssetsManifest as AssetsManifest,
   UNSAFE_RouteModules as RouteModules,
   DataRouter,
+  DeserializeErrorFunction,
   HydrationState,
   RouterInit,
   ClientOnErrorFunction,
@@ -79,9 +80,11 @@ function initSsrInfo(): void {
 function createHydratedRouter({
   getContext,
   instrumentations,
+  deserializeError,
 }: {
   getContext?: RouterInit["getContext"];
   instrumentations?: ClientInstrumentation[];
+  deserializeError?: DeserializeErrorFunction;
 }): DataRouter {
   initSsrInfo();
 
@@ -103,7 +106,11 @@ function createHydratedRouter({
     let stream = ssrInfo.context.stream;
     invariant(stream, "No stream found for single fetch decoding");
     ssrInfo.context.stream = undefined;
-    ssrInfo.stateDecodingPromise = decodeViaTurboStream(stream, window)
+    ssrInfo.stateDecodingPromise = decodeViaTurboStream(
+      stream,
+      window,
+      deserializeError,
+    )
       .then((value) => {
         ssrInfo!.context.state =
           value.value as typeof localSsrInfo.context.state;
@@ -185,6 +192,7 @@ function createHydratedRouter({
       ssrInfo.manifest,
       ssrInfo.routeModules,
       ssrInfo.context.ssr,
+      deserializeError,
     ),
     patchRoutesOnNavigation: getPatchRoutesOnNavigationFunction(
       () => router,
@@ -300,6 +308,25 @@ export interface HydratedRouterProps {
    */
   onError?: ClientOnErrorFunction;
   /**
+   * Optional hook to reconstruct errors on the client from the payload produced
+   * by a custom `unstable_serializeError` hook exported from your `entry.server`
+   * module.  It receives the serialized payload and should return the
+   * reconstructed error (typically an `Error` instance), or `undefined` to leave
+   * the raw payload as-is.
+   *
+   * ```tsx
+   * hydrateRoot(
+   *   document,
+   *   <HydratedRouter unstable_deserializeError={(data) => {
+   *     let error = new MyError(data.message);
+   *     error.code = data.code;
+   *     return error;
+   *   }} />
+   * );
+   * ```
+   */
+  unstable_deserializeError?: DeserializeErrorFunction;
+  /**
    * Control whether router state updates are internally wrapped in
    * [`React.startTransition`](https://react.dev/reference/react/startTransition).
    *
@@ -337,6 +364,7 @@ export function HydratedRouter(props: HydratedRouterProps) {
     router = createHydratedRouter({
       getContext: props.getContext,
       instrumentations: props.instrumentations,
+      deserializeError: props.unstable_deserializeError,
     });
   }
 

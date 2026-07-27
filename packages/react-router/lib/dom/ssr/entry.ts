@@ -14,6 +14,32 @@ type SerializedError = {
   stack?: string;
 };
 
+/**
+ * Hook to customize how errors are serialized on the server before they are
+ * streamed to the client. Exported (as `unstable_serializeError`) from your
+ * `entry.server` module.
+ *
+ * Return a JSON/turbo-stream-serializable value to send to the client (it will
+ * be handed to your `unstable_deserializeError` on the client), or `undefined`
+ * to fall back to React Router's default error serialization.
+ *
+ * NOTE: When you provide this hook, React Router will *not* sanitize errors it
+ * hands to you (so you receive the original error rather than a generic
+ * "Unexpected Server Error").  You are responsible for stripping any sensitive
+ * information (e.g. `stack`) that you don't want to leak to the client.
+ */
+export type SerializeErrorFunction = (error: unknown) => unknown;
+
+/**
+ * Hook to customize how errors are deserialized on the client from the payload
+ * produced by {@link SerializeErrorFunction} on the server. Passed to
+ * `<HydratedRouter unstable_deserializeError>` in your `entry.client` module.
+ *
+ * Return the reconstructed error (typically an `Error` instance), or `undefined`
+ * to leave the raw serialized payload as-is.
+ */
+export type DeserializeErrorFunction = (serialized: unknown) => unknown;
+
 // Object passed to RemixContext.Provider
 export interface FrameworkContextObject {
   manifest: AssetsManifest;
